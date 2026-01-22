@@ -19,12 +19,12 @@ import type {
 import { HMR_MESSAGE_SENT_TO_BROWSER } from './hot-reloader-types'
 import type {
   Update as TurbopackUpdate,
+  NodeJsHmrUpdate,
   Endpoint,
   WrittenEndpoint,
   TurbopackResult,
   Project,
   Entrypoints,
-  NodeJsHmrUpdate,
   NodeJsPartialHmrUpdate,
 } from '../../build/swc/types'
 import { createDefineEnv, getBindingsSync, HmrTarget } from '../../build/swc'
