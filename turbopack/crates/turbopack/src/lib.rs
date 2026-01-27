@@ -194,17 +194,26 @@ async fn apply_module_type(
                         ))
                     }
                     Some(TreeShakingMode::ReexportsOnly) => {
+                        let mangle = module.options().await?.mangle_export_names;
                         if let Some(part) = part {
                             match part {
                                 ModulePart::Evaluation => {
-                                    if *module.get_exports().split_locals_and_reexports().await? {
+                                    if *module
+                                        .get_exports()
+                                        .split_locals_and_reexports(mangle)
+                                        .await?
+                                    {
                                         Vc::upcast(EcmascriptModuleLocalsModule::new(*module))
                                     } else {
                                         Vc::upcast(*module)
                                     }
                                 }
                                 ModulePart::Export(_) => {
-                                    if *module.get_exports().split_locals_and_reexports().await? {
+                                    if *module
+                                        .get_exports()
+                                        .split_locals_and_reexports(mangle)
+                                        .await?
+                                    {
                                         apply_reexport_tree_shaking(
                                             Vc::upcast(
                                                 EcmascriptModuleFacadeModule::new(
@@ -228,7 +237,11 @@ async fn apply_module_type(
                                     part
                                 ),
                             }
-                        } else if *module.get_exports().split_locals_and_reexports().await? {
+                        } else if *module
+                            .get_exports()
+                            .split_locals_and_reexports(mangle)
+                            .await?
+                        {
                             Vc::upcast(EcmascriptModuleFacadeModule::new(
                                 Vc::upcast(*module),
                                 ModulePart::facade(),
