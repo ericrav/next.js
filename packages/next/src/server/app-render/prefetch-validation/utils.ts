@@ -8,7 +8,7 @@ import { InvariantError } from '../../../shared/lib/invariant-error'
 export function createNodeStreamWithLateRelease(
   partialChunks: Array<Uint8Array>,
   allChunks: Array<Uint8Array>,
-  signal: AbortSignal
+  releaseSignal: AbortSignal
 ): Readable {
   if (process.env.NEXT_RUNTIME === 'edge') {
     throw new InvariantError(
@@ -28,7 +28,7 @@ export function createNodeStreamWithLateRelease(
       },
     })
 
-    signal.addEventListener(
+    releaseSignal.addEventListener(
       'abort',
       () => {
         // Flush any remaining chunks from the original set

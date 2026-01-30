@@ -336,7 +336,7 @@ function decodeFromChunks<T>(
   chunks: Uint8Array[],
   allChunks: Uint8Array[],
   debugChunks: Uint8Array[] | null,
-  signal: AbortSignal,
+  releaseSignal: AbortSignal,
   clientReferenceManifest: ClientReferenceManifest,
   timings: Timings | null
 ) {
@@ -359,7 +359,7 @@ function decodeFromChunks<T>(
 
   const segmentStream =
     chunks.length < allChunks.length
-      ? createNodeStreamWithLateRelease(chunks, allChunks, signal)
+      ? createNodeStreamWithLateRelease(chunks, allChunks, releaseSignal)
       : createNodeStreamFromChunks(chunks)
 
   segmentStream.on('end', () => {
@@ -382,7 +382,7 @@ export async function createCombinedPayloadStream(
   createPayload: (
     extraChunksReleaseSignal: AbortSignal
   ) => Promise<InitialRSCPayload>,
-  signal: AbortSignal,
+  renderSignal: AbortSignal,
   clientReferenceManifest: ClientReferenceManifest,
   startTime: number,
   isDebugChannelEnabled: boolean
@@ -402,72 +402,74 @@ export async function createCombinedPayloadStream(
 
   let streamFinished: Promise<any> = null!
 
-  await Promise.all([
-    scheduleInSequentialTasks(
-      () => {
-        const stream = renderToReadableStream(
-          payload,
-          clientReferenceManifest.clientModules,
-          {
-            filterStackFrame,
-            debugChannel: debugChannel?.serverSide,
-            startTime,
-            onError(error: unknown) {
-              const digest = getDigestForWellKnownError(error)
-              if (digest) {
-                return digest
-              }
-              // We don't need to log the errors because we would have already done that
-              // when generating the original Flight stream for the whole page.
-              if (
-                process.env.NEXT_DEBUG_BUILD ||
-                process.env.__NEXT_VERBOSE_LOGGING
-              ) {
-                const workStore = workAsyncStorage.getStore()
-                printDebugThrownValueForProspectiveRender(
-                  error,
-                  workStore?.route ?? 'unknown route',
-                  Phase.PrefetchValidation
-                )
-              }
-            },
-          }
-        )
+  await scheduleInSequentialTasks(
+    () => {
+      const stream = renderToReadableStream(
+        payload,
+        clientReferenceManifest.clientModules,
+        {
+          filterStackFrame,
+          debugChannel: debugChannel?.serverSide,
+          startTime,
+          onError(error: unknown) {
+            const digest = getDigestForWellKnownError(error)
+            if (digest) {
+              return digest
+            }
+            // We don't need to log the errors because we would have already done that
+            // when generating the original Flight stream for the whole page.
+            if (
+              process.env.NEXT_DEBUG_BUILD ||
+              process.env.__NEXT_VERBOSE_LOGGING
+            ) {
+              const workStore = workAsyncStorage.getStore()
+              printDebugThrownValueForProspectiveRender(
+                error,
+                workStore?.route ?? 'unknown route',
+                Phase.PrefetchValidation
+              )
+            }
+          },
+        }
+      )
 
-        streamFinished = Promise.all([
-          // Accumulate Flight chunks
+      streamFinished = Promise.all([
+        // Accumulate Flight chunks
+        (async () => {
+          for await (const chunk of stream.values()) {
+            allChunks.push(chunk)
+            if (isRenderable) {
+              renderableChunks.push(chunk)
+            }
+          }
+        })(),
+        // Accumulate debug chunks
+        debugChannel &&
           (async () => {
-            for await (const chunk of stream.values()) {
-              allChunks.push(chunk)
-              if (isRenderable) {
-                renderableChunks.push(chunk)
-              }
+            for await (const chunk of debugChannel.clientSide.readable.values()) {
+              debugChunks!.push(chunk)
             }
           })(),
-          // Accumulate debug chunks
-          debugChannel &&
-            (async () => {
-              for await (const chunk of debugChannel.clientSide.readable.values()) {
-                debugChunks!.push(chunk)
-              }
-            })(),
-        ])
-      },
-      () => {
-        isRenderable = false
-        extraChunksAbortController.abort()
-      }
-    ),
-    streamFinished,
-  ])
+      ])
+    },
+    () => {
+      isRenderable = false
+      extraChunksAbortController.abort()
+    }
+  )
+
+  await streamFinished
 
   // {
+  //   console.log(
+  //     '\n\n###################### Combined stream ##########################'
+  //   )
   //   const chunksToString = (chunks: Uint8Array[]) =>
   //     Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf-8')
 
-  //   console.log('========= Renderable ==========')
+  //   console.log(`========= Renderable (${renderableChunks.length}) ==========`)
   //   console.log(chunksToString(renderableChunks))
-  //   console.log('========= Extra ==========')
+  //   console.log(`========= Extra (${allChunks.length}) ==========`)
   //   console.log(chunksToString(allChunks.slice(renderableChunks.length)))
   //   console.log('\n')
   // }
@@ -476,10 +478,10 @@ export async function createCombinedPayloadStream(
     stream: createNodeStreamWithLateRelease(
       renderableChunks,
       allChunks,
-      signal
+      renderSignal
     ),
     debugStream: debugChunks
-      ? createNodeStreamFromChunks(debugChunks, signal)
+      ? createNodeStreamFromChunks(debugChunks, renderSignal)
       : null,
   }
 }
@@ -489,7 +491,7 @@ export async function createCombinedPayload(
   cache: ValidationSegmentCache,
   validationRouteTree: ValidationRouteTree,
   navigationParent: SegmentPath,
-  signal: AbortSignal,
+  releaseSignal: AbortSignal,
   clientReferenceManifest: ClientReferenceManifest,
   stageEndTimes: StageEndTimes,
   useRuntimeStageForPartialSegments: boolean,
@@ -500,7 +502,7 @@ export async function createCombinedPayload(
     cache,
     validationRouteTree,
     navigationParent,
-    signal,
+    releaseSignal,
     clientReferenceManifest,
     stageEndTimes,
     useRuntimeStageForPartialSegments,
@@ -797,7 +799,7 @@ function createValidationSeedData(
   cache: ValidationSegmentCache,
   rootRouteTree: ValidationRouteTree,
   navigationParent: SegmentPath,
-  signal: AbortSignal,
+  releaseSignal: AbortSignal,
   clientReferenceManifest: ClientReferenceManifest,
   stageEndTimes: StageEndTimes,
   useRuntimeStageForPartialSegments: boolean,
@@ -886,7 +888,7 @@ function createValidationSeedData(
       segmentChunks.chunks[stage],
       segmentChunks.chunks[RenderStage.Dynamic],
       segmentChunks.debugChunks,
-      signal,
+      releaseSignal,
       clientReferenceManifest,
       stage === RenderStage.Dynamic
         ? null
