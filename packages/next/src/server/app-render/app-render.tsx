@@ -225,6 +225,7 @@ import { imageConfigDefault } from '../../shared/lib/image-config'
 import { RenderStage, StagedRenderingController } from './staged-rendering'
 import {
   anySegmentHasRuntimePrefetchEnabled,
+  anySegmentIsBlocking,
   findSegmentsWithPrefetchConfig,
 } from './staged-validation'
 import { warnOnce } from '../../shared/lib/utils/warn-once'
@@ -3701,9 +3702,16 @@ async function spawnStaticShellValidationInDev(
     workStore,
   } = ctx
 
-  const { allowEmptyStaticShell = false } = renderOpts
-
   const loaderTree = ComponentMod.routeModule.userland.loaderTree
+
+  const allowEmptyStaticShell =
+    (renderOpts.allowEmptyStaticShell ?? false) ||
+    // TODO(prefetch-validation): This is too permissive --
+    // a blocking segment can have a parent with a static config,
+    // in which case we should still require that a static shell is produced.
+    // We can check this when we replace static shell validation with the new validation.
+    (await anySegmentIsBlocking(loaderTree))
+
   const rootParams = getRootParams(loaderTree, getDynamicParamFromSegment)
 
   const hmrRefreshHash = getHmrRefreshHash(workStore, requestStore)
@@ -4102,7 +4110,10 @@ async function validateStagedShell(
     return getStaticShellDisallowedDynamicReasons(
       workStore,
       preludeIsEmpty ? PreludeState.Empty : PreludeState.Full,
-      dynamicValidation
+      dynamicValidation,
+      // TODO(prefetch-validation): if allowEmptyStaticShell is true (likely due to blocking configs),
+      // we should probably just skip this altogether
+      allowEmptyStaticShell
     )
   } catch (thrownValue) {
     // Even if the root errors we still want to report any cache components errors
@@ -4110,7 +4121,10 @@ async function validateStagedShell(
     let errors: Array<unknown> = getStaticShellDisallowedDynamicReasons(
       workStore,
       PreludeState.Errored,
-      dynamicValidation
+      dynamicValidation,
+      // TODO(prefetch-validation): if allowEmptyStaticShell is true (likely due to blocking configs),
+      // we should probably just skip this altogether
+      allowEmptyStaticShell
     )
 
     if (process.env.NEXT_DEBUG_BUILD || process.env.__NEXT_VERBOSE_LOGGING) {
@@ -4548,7 +4562,6 @@ async function prerenderToStream(
   } = ctx
 
   const {
-    allowEmptyStaticShell = false,
     basePath,
     buildManifest,
     ComponentMod,
@@ -4563,6 +4576,14 @@ async function prerenderToStream(
     subresourceIntegrityManifest,
     cacheComponents,
   } = renderOpts
+
+  const allowEmptyStaticShell =
+    (renderOpts.allowEmptyStaticShell ?? false) ||
+    // TODO(prefetch-validation): This is too permissive --
+    // a blocking segment can have a parent with a static config,
+    // in which case we should still require that a static shell is produced.
+    // But that'd need full build-time validation
+    (await anySegmentIsBlocking(tree))
 
   const rootParams = getRootParams(tree, getDynamicParamFromSegment)
 

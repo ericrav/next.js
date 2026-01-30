@@ -585,10 +585,6 @@ export async function createValidationRouteTree(
         ? stringifySegment(segment)
         : createChildSegmentPath(parentPath, key!, segment)
 
-    // NOTE: We've already validated the presence of root layouts for each page,
-    // so we don't need to consider `modType === 'page'` here
-    const isRootLayout = parentLayoutPath === null && modType === 'layout'
-
     let moduleInfo: ValidationRouteTree['module'] = null
     if (layoutOrPageMod !== undefined) {
       // TODO(restart-on-cache-miss): Does this work correctly for client page/layout modules?
@@ -600,28 +596,12 @@ export async function createValidationRouteTree(
         conventionPath: conventionPath!,
       }
 
-      if (isRootLayout) {
-        // For now, root layouts can only have a static `unstable_prefetch`.
-        // Once we adjust build-time logic to accept `unstable_prefetch = false` as an opt-in to blocking,
-        // we can allow `false` as well.
-        if (
-          prefetchConfig !== null &&
-          !(
-            typeof prefetchConfig === 'object' &&
-            prefetchConfig.mode === 'static'
-          )
-        ) {
-          throw new Error(
-            `Found non-static \`unstable_prefetch\` in "${conventionPath}". This is not supported yet.`
-          )
-        }
-        navigationParents.push(segmentPath)
-      } else if (isInsideParallelSlot) {
+      if (isInsideParallelSlot) {
         // For now, we ignore parallel routes for purposes of finding configs to validate
         // and finding shared layout parents.
         if (prefetchConfig !== null) {
           console.error(
-            `Found \`unstable_prefetch\` in "${conventionPath}". \`unstable_prefetch\` validation is not fully implemented for parallel routes yet.`
+            `${conventionPath}: \`unstable_prefetch\` validation is not fully implemented for parallel routes yet.`
           )
         }
       } else {
@@ -635,6 +615,18 @@ export async function createValidationRouteTree(
           // All layouts will be checked as navigation parents, so
           // if a layout has a prefetch config, we'll check navigations into it
           // because we'll be navigating from its parents.
+
+          const isRootLayout = parentLayoutPath === null
+          if (
+            isRootLayout &&
+            prefetchConfig !== null &&
+            typeof prefetchConfig === 'object' &&
+            prefetchConfig.mode === 'runtime'
+          ) {
+            throw new Error(
+              `${conventionPath}: \`unstable_prefetch\` with mode 'runtime' is not supported in root layouts.`
+            )
+          }
 
           // TODO(prefetch-validation): technically we should only validate *shared* layouts,
           // but we have no way of knowing that here.

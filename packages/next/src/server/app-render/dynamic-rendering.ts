@@ -1063,9 +1063,10 @@ export function throwIfDisallowedDynamic(
 export function getStaticShellDisallowedDynamicReasons(
   workStore: WorkStore,
   prelude: PreludeState,
-  dynamicValidation: DynamicValidationState
+  dynamicValidation: DynamicValidationState,
+  configAllowsBlocking: boolean
 ): Array<Error> {
-  if (dynamicValidation.hasSuspenseAboveBody) {
+  if (configAllowsBlocking || dynamicValidation.hasSuspenseAboveBody) {
     // This route has opted into allowing fully dynamic rendering
     // by including a Suspense boundary above the body. In this case
     // a lack of a shell is not considered disallowed so we simply return
