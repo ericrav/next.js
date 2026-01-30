@@ -932,15 +932,23 @@ type SegmentData = {
   node: React.ReactNode | null
   isPartial: boolean
   hasRuntimePrefetch: boolean
+  varyParams: Set<string> | null
 }
 
 function createSegmentData(seedData: CacheNodeSeedData): SegmentData {
-  const [node, _parallelRoutesData, _unused, isPartial, hasRuntimePrefetch] =
-    seedData
+  const [
+    node,
+    _parallelRoutesData,
+    _unused,
+    isPartial,
+    hasRuntimePrefetch,
+    varyParams,
+  ] = seedData
   return {
     node,
     isPartial,
     hasRuntimePrefetch,
+    varyParams,
   }
 }
 type CacheNodeSeedDataSlots = CacheNodeSeedData[1]
@@ -955,6 +963,7 @@ function getCacheNodeSeedDataFromSegment(
     /* unused (previously `loading`) */ null,
     data.isPartial,
     data.hasRuntimePrefetch,
+    data.varyParams,
   ]
 }
 
