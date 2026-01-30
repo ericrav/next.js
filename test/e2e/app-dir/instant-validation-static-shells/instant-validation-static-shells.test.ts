@@ -39,9 +39,7 @@ describe('instant validation - requires a static shell if a below a static layou
 
   if (isNextDev) {
     beforeAll(() => next.start())
-    // TODO(prefetch-validation): this should be an error, but we don't assert anything for parents
-    // of blocking segments
-    it.failing('errors in dev', async () => {
+    it('errors in dev', async () => {
       const browser = await next.browser('/blocking-page-below-static')
       await browser.elementByCss('main')
       await expect(browser).toDisplayCollapsedRedbox(`

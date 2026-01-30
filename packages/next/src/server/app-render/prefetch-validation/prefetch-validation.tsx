@@ -559,7 +559,11 @@ export async function createValidationRouteTree(
   rootLoaderTree: LoaderTree,
   getDynamicParamFromSegment: GetDynamicParamFromSegment
 ) {
-  const navigationParents: SegmentPath[] = []
+  type ValidationTask = { target: SegmentPath; parents: SegmentPath[] }
+
+  const validationTasks: ValidationTask[] = []
+  let navigationParents: SegmentPath[] = []
+
   const segmentsWithPrefetchConfigs: SegmentPath[] = []
   const treeNodes = new Map<SegmentPath, ValidationRouteTree>()
 
@@ -605,51 +609,63 @@ export async function createValidationRouteTree(
           )
         }
       } else {
-        if (prefetchConfig === false) {
-          // TODO(prefetch-validation): what are the semantics of nested `unstable_prefetch = false`?
-          // right now, this'll mean we only validate from the innermost one with `false`, which is not a lot.
-          navigationParents.length = 0
-        }
-
         if (modType === 'layout') {
           // All layouts will be checked as navigation parents, so
           // if a layout has a prefetch config, we'll check navigations into it
           // because we'll be navigating from its parents.
 
-          const isRootLayout = parentLayoutPath === null
-          if (
-            isRootLayout &&
-            prefetchConfig !== null &&
-            typeof prefetchConfig === 'object' &&
-            prefetchConfig.mode === 'runtime'
-          ) {
-            throw new Error(
-              `${conventionPath}: \`unstable_prefetch\` with mode 'runtime' is not supported in root layouts.`
-            )
-          }
+          if (prefetchConfig !== null) {
+            if (prefetchConfig === false) {
+              // we don't want to validate navigations into this segment,
+              // but still want to validate inside it.
+              navigationParents = []
+            } else {
+              const isRootLayout = parentLayoutPath === null
+              if (isRootLayout && prefetchConfig.mode === 'runtime') {
+                throw new Error(
+                  `${conventionPath}: \`unstable_prefetch\` with mode 'runtime' is not supported in root layouts.`
+                )
+              }
 
-          // TODO(prefetch-validation): technically we should only validate *shared* layouts,
-          // but we have no way of knowing that here.
+              const task: ValidationTask = {
+                target: segmentPath,
+                parents: navigationParents,
+              }
+              validationTasks.push(task)
+              navigationParents = []
+            }
+          }
           navigationParents.push(segmentPath)
         } else if (modType === 'page') {
-          if (parentPath === null) {
-            throw new InvariantError('A page must have a root layout')
-          }
-
-          // If the page itself has a prefetch config, then
-          // make sure we always validate a navigation from its parent
-          // to ensure `__PAGE__?p=foo -> __PAGE__?p=bar` works.
-          //
-          // This is relevant if the parent layout is implicit, as in
-          //   my-segment/
-          //     loading.tsx
-          //     page.tsx
-          // because the above code for layouts wouldn't add it.
-          // TODO: what if this is runtime-prefetched? how does that affect a search-param navigation?
-          // TODO: this can cause double validation if the parent segment is empty
-          //       but we have a parent layout that'd be validated
-          if (prefetchConfig && !navigationParents.includes(parentPath)) {
-            navigationParents.push(parentPath)
+          if (prefetchConfig !== null) {
+            if (prefetchConfig === false) {
+              navigationParents = []
+            } else {
+              // If the page itself has a prefetch config, then
+              // make sure we always validate a navigation from its parent
+              // to ensure `__PAGE__?p=foo -> __PAGE__?p=bar` works.
+              //
+              // This is relevant if the parent layout is implicit, as in
+              //   my-segment/
+              //     loading.tsx
+              //     page.tsx
+              // because the above code for layouts wouldn't add it.
+              // TODO: what if this is runtime-prefetched? how does that affect a search-param navigation?
+              // TODO: this can cause double validation if the parent segment is empty
+              //       but we have a parent layout that'd be validated
+              if (parentPath === null) {
+                throw new InvariantError('A page must have a root layout')
+              }
+              if (!navigationParents.includes(parentPath)) {
+                navigationParents.push(parentPath)
+              }
+              const task: ValidationTask = {
+                target: segmentPath,
+                parents: navigationParents,
+              }
+              validationTasks.push(task)
+              navigationParents = []
+            }
           }
         }
 
@@ -691,7 +707,8 @@ export async function createValidationRouteTree(
   return {
     tree: routeTree,
     treeNodes,
-    navigationParents,
+    // TODO: do we want to preserve info about which config caused a validation to occur?
+    navigationParents: validationTasks.flatMap((task) => task.parents),
     segmentsWithPrefetchConfigs,
   }
 }
@@ -815,11 +832,7 @@ function createValidationSeedData(
           // We're not already inside a runtime prefetch, so by default we prefetch statically.
           // Check if we need to switch to runtime prefetching instead.
           const prefetchConfig = routeTree.module?.prefetchConfig
-          if (prefetchConfig === false) {
-            throw new InvariantError(
-              'Unexpected `export const unstable_prefetch = false` in new tree'
-            )
-          } else if (
+          if (
             prefetchConfig &&
             typeof prefetchConfig === 'object' &&
             prefetchConfig.mode === 'runtime'
@@ -831,6 +844,9 @@ function createValidationSeedData(
           } else {
             // No runtime prefetch config. Continue using static prefetching.
             //
+            // Note that we can also get here for `unstable_prefetch = false` with a `mode: 'static'` parent.
+            // `false` doesn't currently affect router behavior, so we act like it's not there.
+            //
             // If the initial validation failed, we retry the render and use the runtime stage
             // for static segments. This lets us discriminate runtime and dynamic holes.
             stage = useRuntimeStageForPartialSegments
@@ -840,6 +856,8 @@ function createValidationSeedData(
           }
         } else {
           // We're already inside a runtime prefetch, so we stay this way.
+          // Note that we can also get here for `unstable_prefetch = false` with a `mode: 'runtime'` parent.
+          // `false` doesn't currently affect router behavior, so we act like it's not there.
           stage = RenderStage.Runtime
           nextState = state
         }
@@ -859,7 +877,11 @@ function createValidationSeedData(
     if (!segmentChunks) {
       throw new InvariantError(`Missing segment data: ${path}`)
     }
+
+    // TODO: for runtime-only validations, empty segments can throw this off
+    // and make us retry even though there's no *real* static segments in the tree
     usedSegmentKinds.add(stage)
+
     let segmentData = await decodeFromChunks<SegmentData>(
       segmentChunks.chunks[stage],
       segmentChunks.chunks[RenderStage.Dynamic],

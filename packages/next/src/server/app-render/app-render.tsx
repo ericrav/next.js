@@ -4285,6 +4285,7 @@ async function validatePrefetchConfigs(
 
     if (initialResults.errors.length > 0) {
       if (initialResults.dynamicHoleKind !== DynamicHoleKind.Dynamic) {
+        console.log('Retrying to gather more info...')
         const runtimeResults = await validatePrefetchConfig(
           initialRscPayload,
           cache,
