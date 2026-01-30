@@ -4369,6 +4369,8 @@ async function validatePrefetchConfig(
     prerenderResumeDataCache: null,
     renderResumeDataCache: null,
     hmrRefreshHash,
+    // We don't need to track vary params during validation.
+    varyParamsAccumulator: null,
   }
 
   const dynamicValidation = createDynamicValidationState()
