@@ -43,7 +43,7 @@ export { taintObjectReference } from './rsc/taint'
 export { collectSegmentData } from './collect-segment-data'
 
 export const prefetchValidation =
-  process.env.NODE_ENV === 'development'
+  process.env.NODE_ENV === 'development' && process.env.NEXT_RUNTIME !== 'edge'
     ? (require('./prefetch-validation/prefetch-validation') as typeof import('./prefetch-validation/prefetch-validation'))
     : undefined
 
